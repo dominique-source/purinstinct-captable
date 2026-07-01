@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
-import { Plus, Trash2, Info, TrendingUp, ShieldCheck, ChevronDown, RotateCcw, Users, History } from "lucide-react";
+import { Plus, Trash2, Info, TrendingUp, ShieldCheck, ChevronDown, RotateCcw, Users, History, ArrowRightLeft, Copy, X } from "lucide-react";
 import { db, authReady, firebaseEnabled } from "./firebase";
 import { collection, addDoc, serverTimestamp, query, orderBy, limit, onSnapshot } from "firebase/firestore";
 
@@ -86,6 +86,82 @@ const CSUITE_ROLES = [
 
 const csuiteColor = (i) => FOUNDER_COLORS[i % FOUNDER_COLORS.length];
 
+// 10 responsabilités essentielles par défaut, par rôle — éditables dans l'interface
+const DEFAULT_RESPONSIBILITIES = {
+  ceo: [
+    "Vision produit et direction stratégique de PürInstinct / Games / INSTINCT",
+    "Arbitrage final sur les décisions de capital et de levée de fonds",
+    "Recrutement et rétention de l'équipe de direction",
+    "Relations avec les investisseurs et le conseil d'administration",
+    "Partenariats stratégiques structurants (marques, ligues, diffuseurs)",
+    "Positionnement global de la marque face au marché",
+    "Décisions finales sur la gouvernance et la structure d'équité",
+    "Porte-parole principal auprès des médias et du public",
+    "Validation du calendrier annuel des priorités clés",
+    "Culture d'entreprise et vision à long terme",
+  ],
+  coo: [
+    "Développement d'affaires et prospection de nouveaux partenaires",
+    "Présence dans les rencontres stratégiques avec le CEO",
+    "Négociation de contrats commerciaux et de partenariats",
+    "Structuration des opérations à l'échelle de l'entreprise",
+    "Suivi des indicateurs de performance (KPI) inter-départements",
+    "Coordination entre les équipes Games, INSTINCT et corporatif",
+    "Développement de nouveaux marchés, villes ou territoires",
+    "Relations avec les fournisseurs et partenaires stratégiques",
+    "Optimisation des processus internes et scalabilité",
+    "Support à la structuration de la prochaine ronde de financement",
+  ],
+  cfo: [
+    "Modélisation financière et prévisions budgétaires",
+    "Structuration des rondes de financement (SAFE, ronde priced)",
+    "Reporting aux investisseurs et au conseil",
+    "Gestion de la trésorerie et des flux de liquidités",
+    "Conformité fiscale et réglementaire",
+    "Mise en place des politiques de gouvernance interne",
+    "Négociation avec les institutions financières",
+    "Suivi de la rentabilité par ligne d'affaires (Games / INSTINCT)",
+    "Structuration de la table de capitalisation et du vesting",
+    "Audit interne et gestion des risques financiers",
+  ],
+  cmo: [
+    "Positionnement de marque et messages clés",
+    "Stratégie de contenu et calendrier éditorial",
+    "Gestion des réseaux sociaux et de la communauté",
+    "Coordination du narratif entre Games et INSTINCT",
+    "Campagnes d'acquisition et de croissance",
+    "Partenariats médias et relations publiques",
+    "Stratégie d'influenceurs et d'ambassadeurs",
+    "Analyse des données marketing et optimisation du ROI",
+    "Supervision de l'identité visuelle et du ton de marque",
+    "Lancement de nouveaux produits ou événements",
+  ],
+  logistics: [
+    "Calendrier et planification des événements",
+    "Gestion de la billetterie et des inscriptions",
+    "Approvisionnement et gestion du matériel",
+    "Recrutement, formation et supervision des coachs sur site",
+    "Coordination des bénévoles et du personnel terrain",
+    "Sécurité et conformité sur les sites d'événements",
+    "Relations avec les fournisseurs et lieux d'accueil",
+    "Logistique de transport et d'hébergement des équipes",
+    "Gestion des horaires et de l'animation le jour J",
+    "Bilan post-événement et amélioration continue",
+  ],
+  creative: [
+    "Langage visuel et direction artistique globale",
+    "Expérience de marque sur les événements et le contenu",
+    "Direction de la production vidéo et photo",
+    "Supervision du design graphique (Games + INSTINCT)",
+    "Cohérence visuelle entre les plateformes et supports",
+    "Direction artistique des campagnes marketing",
+    "Création de l'ambiance et de la scénographie événementielle",
+    "Collaboration avec les créateurs de contenu externes",
+    "Développement de nouveaux formats créatifs",
+    "Gestion de la bibliothèque d'actifs de marque",
+  ],
+};
+
 const defaultCsuiteState = () => {
   const st = {};
   CSUITE_ROLES.forEach((r, i) => {
@@ -96,6 +172,7 @@ const defaultCsuiteState = () => {
       color: csuiteColor(i),
       cliffMonths: 12,
       vestMonths: 48,
+      responsibilities: (DEFAULT_RESPONSIBILITIES[r.key] || []).map((label, idx) => ({ id: `${r.key}-${idx}`, label })),
     };
   });
   return st;
@@ -123,6 +200,9 @@ export default function EquitySplitStudio() {
   const [csuiteWeights, setCsuiteWeights] = useState(DEFAULT_WEIGHTS);
   const [csuiteTab, setCsuiteTab] = useState("individual"); // "individual" | "category"
   const [csuiteEsop, setCsuiteEsop] = useState(12);
+  const [expandedCsuiteKey, setExpandedCsuiteKey] = useState(CSUITE_ROLES[0].key);
+  const [respTarget, setRespTarget] = useState({});
+  const [newRespText, setNewRespText] = useState({});
 
   // C-suite Seed Round (SAFE) simulation
   const [showCsuiteSeed, setShowCsuiteSeed] = useState(false);
@@ -162,6 +242,7 @@ export default function EquitySplitStudio() {
     setCsuiteSeedCap(4000000);
     setCsuiteSeedTopUpPool(true);
     setCsuiteSeedTopUpTarget(15);
+    setExpandedCsuiteKey(CSUITE_ROLES[0].key);
   };
 
   const weightTotal = Object.values(weights).reduce((a, b) => a + b, 0);
@@ -241,6 +322,39 @@ export default function EquitySplitStudio() {
 
   const updateCsuiteField = (key, patch) =>
     setCsuite((c) => ({ ...c, [key]: { ...c[key], ...patch } }));
+
+  const addResponsibility = (roleKey, label) => {
+    if (!label.trim()) return;
+    setCsuite((c) => ({
+      ...c,
+      [roleKey]: {
+        ...c[roleKey],
+        responsibilities: [...(c[roleKey].responsibilities || []), { id: `${roleKey}-${Date.now()}`, label: label.trim() }],
+      },
+    }));
+  };
+
+  const removeResponsibility = (roleKey, respId) => {
+    setCsuite((c) => ({
+      ...c,
+      [roleKey]: { ...c[roleKey], responsibilities: (c[roleKey].responsibilities || []).filter((r) => r.id !== respId) },
+    }));
+  };
+
+  const moveResponsibility = (fromKey, respId, toKey, mode) => {
+    if (!toKey || toKey === fromKey) return;
+    setCsuite((c) => {
+      const resp = (c[fromKey].responsibilities || []).find((r) => r.id === respId);
+      if (!resp) return c;
+      const newItem = { id: `${toKey}-${Date.now()}`, label: resp.label };
+      const next = { ...c };
+      if (mode === "transfer") {
+        next[fromKey] = { ...c[fromKey], responsibilities: c[fromKey].responsibilities.filter((r) => r.id !== respId) };
+      }
+      next[toKey] = { ...c[toKey], responsibilities: [...(c[toKey].responsibilities || []), newItem] };
+      return next;
+    });
+  };
 
   const csuiteResults = useMemo(() => {
     const available = 100 - csuiteEsop;
@@ -887,9 +1001,15 @@ export default function EquitySplitStudio() {
 
               <div className="space-y-3">
                 <span className="text-[11px] tracking-[0.2em] text-[#9A9A94] font-semibold">LES 6 RÔLES</span>
-                {csuiteResults.map((r) => (
+                {csuiteResults.map((r) => {
+                  const isOpen = expandedCsuiteKey === r.key;
+                  return (
                   <div key={r.key} className="bg-[#151515] border border-[#232323] rounded-2xl overflow-hidden">
-                    <div className="p-4 flex items-center gap-3" style={{ borderLeft: `4px solid ${r.color}` }}>
+                    <button
+                      onClick={() => setExpandedCsuiteKey(isOpen ? null : r.key)}
+                      className="w-full p-4 flex items-center gap-3 text-left"
+                      style={{ borderLeft: `4px solid ${r.color}` }}
+                    >
                       <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: r.color }} />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
@@ -903,8 +1023,10 @@ export default function EquitySplitStudio() {
                         <div className="text-[11px] text-[#8A8A85]">{r.scope} &middot; {r.fte}</div>
                       </div>
                       <div className="disp italic font-black text-[22px] text-[#F2F2ED]">{r.pct.toFixed(1)}%</div>
-                    </div>
+                      <ChevronDown size={16} className={`text-[#666] transition-transform flex-shrink-0 ${isOpen ? "rotate-180" : ""}`} />
+                    </button>
 
+                    {isOpen && (
                     <div className="px-4 pb-5 pt-1 border-t border-[#232323] space-y-4">
                       <p className="text-[12.5px] text-[#B5B5AF] leading-relaxed">{r.desc}</p>
 
@@ -977,9 +1099,82 @@ export default function EquitySplitStudio() {
                           ))}
                         </div>
                       )}
+
+                      <div className="pt-2 border-t border-[#232323]">
+                        <div className="flex items-center justify-between mb-2 pt-2">
+                          <span className="text-[10.5px] text-[#6B6B66] tracking-wide">RESPONSABILITÉS ({(csuite[r.key].responsibilities || []).length})</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] text-[#6B6B66]">Vers</span>
+                            <select
+                              value={respTarget[r.key] || CSUITE_ROLES.find((x) => x.key !== r.key)?.key}
+                              onChange={(e) => setRespTarget((t) => ({ ...t, [r.key]: e.target.value }))}
+                              className="bg-[#0D0D0D] border border-[#2A2A2A] rounded-lg px-1.5 py-1 text-[11px] text-[#B5B5AF] focus:outline-none focus:border-[#CCFF00]"
+                            >
+                              {CSUITE_ROLES.filter((x) => x.key !== r.key).map((x) => (
+                                <option key={x.key} value={x.key}>{x.title}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          {(csuite[r.key].responsibilities || []).map((resp) => (
+                            <div key={resp.id} className="flex items-center gap-1.5 bg-[#0D0D0D] border border-[#232323] rounded-lg px-2.5 py-1.5">
+                              <span className="flex-1 text-[12px] text-[#D5D5D0]">{resp.label}</span>
+                              <button
+                                onClick={() => moveResponsibility(r.key, resp.id, respTarget[r.key] || CSUITE_ROLES.find((x) => x.key !== r.key)?.key, "transfer")}
+                                title="Transférer vers le rôle sélectionné"
+                                className="text-[#6B6B66] hover:text-[#CCFF00] flex-shrink-0"
+                              >
+                                <ArrowRightLeft size={12} />
+                              </button>
+                              <button
+                                onClick={() => moveResponsibility(r.key, resp.id, respTarget[r.key] || CSUITE_ROLES.find((x) => x.key !== r.key)?.key, "duplicate")}
+                                title="Dupliquer vers le rôle sélectionné"
+                                className="text-[#6B6B66] hover:text-[#CCFF00] flex-shrink-0"
+                              >
+                                <Copy size={12} />
+                              </button>
+                              <button
+                                onClick={() => removeResponsibility(r.key, resp.id)}
+                                title="Supprimer cette responsabilité"
+                                className="text-[#6B6B66] hover:text-[#FF6B6B] flex-shrink-0"
+                              >
+                                <X size={12} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="flex gap-2 mt-2">
+                          <input
+                            value={newRespText[r.key] || ""}
+                            onChange={(e) => setNewRespText((t) => ({ ...t, [r.key]: e.target.value }))}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                addResponsibility(r.key, newRespText[r.key] || "");
+                                setNewRespText((t) => ({ ...t, [r.key]: "" }));
+                              }
+                            }}
+                            placeholder="Ajouter une responsabilité…"
+                            className="flex-1 bg-[#0D0D0D] border border-[#2A2A2A] rounded-lg px-2.5 py-1.5 text-[12px] focus:outline-none focus:border-[#CCFF00]"
+                          />
+                          <button
+                            onClick={() => {
+                              addResponsibility(r.key, newRespText[r.key] || "");
+                              setNewRespText((t) => ({ ...t, [r.key]: "" }));
+                            }}
+                            className="flex items-center gap-1 text-[12px] text-[#CCFF00] px-2 flex-shrink-0"
+                          >
+                            <Plus size={14} /> Ajouter
+                          </button>
+                        </div>
+                      </div>
                     </div>
+                    )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 
