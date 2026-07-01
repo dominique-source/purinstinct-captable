@@ -40,13 +40,6 @@ const CSUITE_ROLES = [
     fte: "Fractionnaire possible",
   },
   {
-    key: "cmo",
-    title: "CMO",
-    scope: "Marque & croissance",
-    desc: "Positionnement de marque, stratégie de contenu et réseaux, coordination du narratif entre Games et INSTINCT.",
-    fte: "Temps plein ou fractionnaire",
-  },
-  {
     key: "logistics",
     title: "Logistique & production événement",
     scope: "Exécution terrain",
@@ -101,18 +94,6 @@ const DEFAULT_RESPONSIBILITIES = {
     "Suivi de la rentabilité par ligne d'affaires (Games / INSTINCT)",
     "Structuration de la table de capitalisation et du vesting",
     "Audit interne et gestion des risques financiers",
-  ],
-  cmo: [
-    "Positionnement de marque et messages clés",
-    "Stratégie de contenu et calendrier éditorial",
-    "Gestion des réseaux sociaux et de la communauté",
-    "Coordination du narratif entre Games et INSTINCT",
-    "Campagnes d'acquisition et de croissance",
-    "Partenariats médias et relations publiques",
-    "Stratégie d'influenceurs et d'ambassadeurs",
-    "Analyse des données marketing et optimisation du ROI",
-    "Supervision de l'identité visuelle et du ton de marque",
-    "Lancement de nouveaux produits ou événements",
   ],
   logistics: [
     "Calendrier et planification des événements",
