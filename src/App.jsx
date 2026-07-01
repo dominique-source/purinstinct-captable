@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
-import { Plus, Trash2, Info, TrendingUp, ShieldCheck, ChevronDown, RotateCcw, Users, History, ArrowRightLeft, Copy, X, Clock, AlertTriangle, Sparkles } from "lucide-react";
+import { Plus, Trash2, Info, TrendingUp, ShieldCheck, ChevronDown, RotateCcw, Users, History, ArrowRightLeft, Copy, X, Clock, AlertTriangle, Sparkles, Bookmark, BookmarkPlus } from "lucide-react";
 import { db, authReady, firebaseEnabled } from "./firebase";
 import { collection, addDoc, updateDoc, doc, increment, serverTimestamp, query, orderBy, limit, onSnapshot } from "firebase/firestore";
 
@@ -234,6 +234,9 @@ export default function EquitySplitStudio() {
   const [showHistory, setShowHistory] = useState(false);
   const [confirmRestoreId, setConfirmRestoreId] = useState(null);
   const [isFlushingSave, setIsFlushingSave] = useState(false);
+  const [showSaveSessionModal, setShowSaveSessionModal] = useState(false);
+  const [sessionLabelInput, setSessionLabelInput] = useState("");
+  const [isSavingNamedSession, setIsSavingNamedSession] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState(() => (typeof window !== "undefined" ? localStorage.getItem("captable_session_id") : null));
   const restoringRef = useRef(false);
   const lastSavedRef = useRef(null);
@@ -519,6 +522,31 @@ export default function EquitySplitStudio() {
     employees, advisors,
   });
 
+  // Sauvegarde manuelle nommée — crée toujours une nouvelle entrée distincte dans l'historique,
+  // sans interrompre le regroupement automatique de la session en cours.
+  const saveNamedSession = async (label) => {
+    if (!firebaseEnabled || !label.trim()) return;
+    setIsSavingNamedSession(true);
+    try {
+      await authReady;
+      const snap = snapshotState();
+      await addDoc(collection(db, "captable_history"), {
+        data: snap,
+        label: label.trim(),
+        manual: true,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        editCount: 1,
+      });
+      setShowSaveSessionModal(false);
+      setSessionLabelInput("");
+    } catch (err) {
+      console.error("Sauvegarde nommée échouée", err);
+    } finally {
+      setIsSavingNamedSession(false);
+    }
+  };
+
   const restoreSnapshot = async (snap) => {
     // Flush toute modification en attente de la session en cours AVANT de basculer,
     // pour garantir qu'aucun changement récent (< 2.5s) ne soit perdu.
@@ -640,6 +668,14 @@ export default function EquitySplitStudio() {
     return () => window.removeEventListener("keydown", onKey);
   }, [showHistory]);
 
+  // Fermer le modal "Sauvegarder cette session" avec Échap
+  useEffect(() => {
+    if (!showSaveSessionModal) return;
+    const onKey = (e) => { if (e.key === "Escape") setShowSaveSessionModal(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showSaveSessionModal]);
+
   // Fermer le popover "Équité suggérée" au clic extérieur
   useEffect(() => {
     if (!equityPopoverKey) return;
@@ -744,14 +780,20 @@ export default function EquitySplitStudio() {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-[13px] font-semibold text-[#F2F2ED]">{formatSessionRange(h)}</span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {h.label && <Bookmark size={12} className="text-[#CCFF00] flex-shrink-0" />}
+                          <span className="text-[13px] font-semibold text-[#F2F2ED] truncate">
+                            {h.label || formatSessionRange(h)}
+                          </span>
                           {isCurrent && (
                             <span className="text-[9px] tracking-wide uppercase text-[#0D0D0D] bg-[#CCFF00] rounded-full px-1.5 py-0.5 font-semibold flex-shrink-0">
                               En cours
                             </span>
                           )}
                         </div>
+                        {h.label && (
+                          <div className="text-[11px] text-[#6B6B66] mt-0.5">{formatSessionRange(h)}</div>
+                        )}
                         <div className="text-[11.5px] text-[#8A8A85] mt-1">
                           {formatRelative(h.updatedAt)} &middot; {h.editCount || 1} modification{(h.editCount || 1) > 1 ? "s" : ""}
                         </div>
@@ -804,6 +846,58 @@ export default function EquitySplitStudio() {
         </>
       )}
 
+      {/* Modal "Sauvegarder cette session" */}
+      {showSaveSessionModal && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40"
+            style={{ animation: "historyScrimIn 200ms ease-out" }}
+            onClick={() => { setShowSaveSessionModal(false); setSessionLabelInput(""); }}
+          />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Sauvegarder cette session">
+            <div
+              className="bg-[#111111] border border-[#2A2A2A] rounded-2xl p-6 w-full max-w-sm shadow-2xl"
+              style={{ animation: "historyScrimIn 220ms ease-out" }}
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <BookmarkPlus size={15} className="text-[#CCFF00]" />
+                <span className="text-[11px] tracking-[0.2em] text-[#CCFF00] font-semibold">NOMMER CETTE SESSION</span>
+              </div>
+              <p className="text-[11.5px] text-[#8A8A85] mb-3 leading-relaxed">
+                Ex.: "1er juillet &mdash; discussion avec François". Tu la retrouveras sous ce nom dans l'historique.
+              </p>
+              <input
+                autoFocus
+                value={sessionLabelInput}
+                onChange={(e) => setSessionLabelInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") saveNamedSession(sessionLabelInput); }}
+                placeholder="Nom de la session…"
+                className="w-full bg-[#0D0D0D] border border-[#2A2A2A] rounded-lg px-3 py-2 text-[14px] focus:outline-none focus:border-[#CCFF00]"
+              />
+              <div className="flex items-center justify-end gap-2 mt-4">
+                <button
+                  onClick={() => { setShowSaveSessionModal(false); setSessionLabelInput(""); }}
+                  disabled={isSavingNamedSession}
+                  className="text-[12px] text-[#9A9A94] hover:text-[#F2F2ED] px-3 py-1.5 rounded-full border border-[#2A2A2A] hover:border-[#444] transition-colors disabled:opacity-40"
+                >
+                  Annuler
+                </button>
+                <button
+                  onClick={() => saveNamedSession(sessionLabelInput)}
+                  disabled={!sessionLabelInput.trim() || isSavingNamedSession}
+                  className="text-[12px] font-semibold text-[#0D0D0D] bg-[#CCFF00] hover:brightness-110 rounded-full px-4 py-1.5 transition-[filter] disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {isSavingNamedSession && (
+                    <span className="w-3 h-3 border-2 border-[#0D0D0D]/30 border-t-[#0D0D0D] rounded-full animate-spin" />
+                  )}
+                  {isSavingNamedSession ? "Sauvegarde…" : "Sauvegarder"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
       {/* Header */}
       <div className="border-b border-[#232323] px-5 sm:px-8 pt-8 pb-6">
         <div className="max-w-6xl mx-auto">
@@ -834,6 +928,15 @@ export default function EquitySplitStudio() {
           <p className="text-[#9A9A94] text-sm mt-3 max-w-xl leading-relaxed">
             Basé sur la méthodologie Carta pour cofondateurs&nbsp;: apport initial, engagement, risque et compétences critiques &mdash; pondérés, pas divisés à parts égales par défaut.
           </p>
+
+          {firebaseEnabled && (
+            <button
+              onClick={() => setShowSaveSessionModal(true)}
+              className="mt-5 flex items-center gap-2 text-[14px] font-bold text-[#0D0D0D] bg-[#CCFF00] hover:brightness-110 rounded-2xl px-5 py-3 shadow-[0_0_28px_rgba(204,255,0,0.28)] transition-[filter]"
+            >
+              <BookmarkPlus size={17} /> Sauvegarder cette session
+            </button>
+          )}
         </div>
       </div>
 
