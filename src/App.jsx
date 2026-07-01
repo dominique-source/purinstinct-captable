@@ -220,6 +220,11 @@ export default function EquitySplitStudio() {
   const [csuiteSeedTopUpPool, setCsuiteSeedTopUpPool] = useState(true);
   const [csuiteSeedTopUpTarget, setCsuiteSeedTopUpTarget] = useState(15);
 
+  // Employés (sous la structure de direction) — nom, titre libre, salaire, participation ESOP, responsabilités
+  const [employees, setEmployees] = useState([]);
+  const [expandedEmployeeId, setExpandedEmployeeId] = useState(null);
+  const [newEmpRespText, setNewEmpRespText] = useState({});
+
   // Historique (Firebase) — sessions de travail sauvegardées automatiquement
   const [history, setHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
@@ -257,6 +262,8 @@ export default function EquitySplitStudio() {
     setCsuiteSeedTopUpPool(true);
     setCsuiteSeedTopUpTarget(15);
     setExpandedCsuiteKey(CSUITE_ROLES[0].key);
+    setEmployees([]);
+    setExpandedEmployeeId(null);
   };
 
   const weightTotal = Object.values(weights).reduce((a, b) => a + b, 0);
@@ -371,6 +378,37 @@ export default function EquitySplitStudio() {
     };
   };
 
+  // ---- Employés ----
+  const addEmployee = () => {
+    const id = crypto.randomUUID();
+    setEmployees((es) => [...es, {
+      id, name: "", title: "", annualSalary: 0, esopParticipation: 0, responsibilities: [],
+    }]);
+    setExpandedEmployeeId(id);
+  };
+
+  const updateEmployee = (id, patch) =>
+    setEmployees((es) => es.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+
+  const removeEmployee = (id) => {
+    setEmployees((es) => es.filter((e) => e.id !== id));
+    setExpandedEmployeeId((cur) => (cur === id ? null : cur));
+  };
+
+  const addEmployeeResponsibility = (empId, label) => {
+    if (!label.trim()) return;
+    setEmployees((es) => es.map((e) => (
+      e.id === empId ? { ...e, responsibilities: [...e.responsibilities, { id: `${empId}-${Date.now()}`, label: label.trim() }] } : e
+    )));
+  };
+
+  const removeEmployeeResponsibility = (empId, respId) =>
+    setEmployees((es) => es.map((e) => (
+      e.id === empId ? { ...e, responsibilities: e.responsibilities.filter((r) => r.id !== respId) } : e
+    )));
+
+  const totalEmployeeEsop = employees.reduce((s, e) => s + (Number(e.esopParticipation) || 0), 0);
+
   const addResponsibility = (roleKey, label) => {
     if (!label.trim()) return;
     setCsuite((c) => ({
@@ -452,6 +490,7 @@ export default function EquitySplitStudio() {
     raiseAmount, preMoney, topUpPool, topUpTarget,
     csuite, csuiteWeights, csuiteEsop,
     csuiteSeedRaise, csuiteSeedCap, csuiteSeedTopUpPool, csuiteSeedTopUpTarget,
+    employees,
   });
 
   const restoreSnapshot = async (snap) => {
@@ -504,6 +543,8 @@ export default function EquitySplitStudio() {
     setCsuiteSeedCap(snap.csuiteSeedCap ?? 4000000);
     setCsuiteSeedTopUpPool(snap.csuiteSeedTopUpPool ?? true);
     setCsuiteSeedTopUpTarget(snap.csuiteSeedTopUpTarget ?? 15);
+    setEmployees(snap.employees ?? []);
+    setExpandedEmployeeId(null);
     setShowHistory(false);
     setConfirmRestoreId(null);
     // Restaurer une ancienne version démarre une nouvelle session — on ne veut pas
@@ -561,7 +602,7 @@ export default function EquitySplitStudio() {
     }, 2500);
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [method, founders, weights, esopPool, cliffMonths, vestMonths, raiseAmount, preMoney, topUpPool, topUpTarget, csuite, csuiteWeights, csuiteEsop, csuiteSeedRaise, csuiteSeedCap, csuiteSeedTopUpPool, csuiteSeedTopUpTarget]);
+  }, [method, founders, weights, esopPool, cliffMonths, vestMonths, raiseAmount, preMoney, topUpPool, topUpTarget, csuite, csuiteWeights, csuiteEsop, csuiteSeedRaise, csuiteSeedCap, csuiteSeedTopUpPool, csuiteSeedTopUpTarget, employees]);
 
   // Fermer le tiroir d'historique avec Échap
   useEffect(() => {
@@ -1649,6 +1690,175 @@ export default function EquitySplitStudio() {
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* ============================================================ */}
+      {/* EMPLOYÉS                                                       */}
+      {/* ============================================================ */}
+      <div className="max-w-6xl mx-auto px-5 sm:px-8 mt-16">
+        <div className="border-t border-[#232323] pt-10">
+          <div className="flex items-center justify-between gap-4 mb-3">
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <Users size={14} className="text-[#CCFF00]" />
+                <span className="text-[11px] tracking-[0.25em] text-[#CCFF00] font-semibold">EMPLOYÉS</span>
+              </div>
+              <h2 className="disp italic font-black text-[32px] sm:text-[42px] leading-[0.95] tracking-tight">
+                Équipe
+              </h2>
+            </div>
+            <button
+              onClick={addEmployee}
+              className="flex items-center gap-1.5 text-[13px] font-medium text-[#0D0D0D] bg-[#CCFF00] hover:brightness-110 rounded-full px-4 py-2 transition-[filter] flex-shrink-0"
+            >
+              <Plus size={14} /> Ajouter un employé
+            </button>
+          </div>
+          <p className="text-[#9A9A94] text-sm max-w-2xl leading-relaxed mb-6">
+            Employés hors direction &mdash; nom, titre, salaire, participation au pool ESOP et responsabilités propres à chacun.
+          </p>
+
+          {employees.length > 0 && (
+            <div className="flex items-center justify-between text-[12.5px] bg-[#151515] border border-[#232323] rounded-2xl px-5 py-3 mb-4">
+              <span className="text-[#8A8A85]">Participation ESOP totale allouée aux employés</span>
+              <span className={`font-mono font-semibold ${totalEmployeeEsop > esopPool ? "text-[#FF6B6B]" : "text-[#CCFF00]"}`}>
+                {totalEmployeeEsop.toFixed(1)}% / {esopPool}% (pool)
+              </span>
+            </div>
+          )}
+          {totalEmployeeEsop > esopPool && (
+            <p className="text-[11px] text-[#FF6B6B] -mt-2 mb-4">
+              La participation cumulée dépasse la réserve ESOP définie en haut de page ({esopPool}%) &mdash; augmente le pool ou réduis les participations.
+            </p>
+          )}
+
+          {employees.length === 0 ? (
+            <div className="bg-[#151515] border border-[#232323] border-dashed rounded-2xl p-8 text-center">
+              <p className="text-[13px] text-[#8A8A85]">Aucun employé ajouté pour l'instant.</p>
+              <p className="text-[11.5px] text-[#6B6B66] mt-1.5">Clique sur "Ajouter un employé" pour commencer.</p>
+            </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2">
+              {employees.map((emp) => {
+                const isOpen = expandedEmployeeId === emp.id;
+                return (
+                  <div key={emp.id} className="bg-[#151515] border border-[#232323] rounded-2xl overflow-hidden self-start">
+                    <button
+                      onClick={() => setExpandedEmployeeId(isOpen ? null : emp.id)}
+                      className="w-full p-4 flex items-center gap-3 text-left"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[14px] font-semibold truncate">{emp.name || "Nouvel employé"}</div>
+                        <div className="text-[12px] text-[#8A8A85] truncate">{emp.title || "Titre à définir"}</div>
+                      </div>
+                      {emp.esopParticipation > 0 && (
+                        <div className="disp italic font-black text-[18px] text-[#F2F2ED] flex-shrink-0">{emp.esopParticipation}%</div>
+                      )}
+                      <ChevronDown size={16} className={`text-[#666] transition-transform flex-shrink-0 ${isOpen ? "rotate-180" : ""}`} />
+                    </button>
+
+                    {isOpen && (
+                      <div className="px-4 pb-5 pt-1 border-t border-[#232323] space-y-4">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[10.5px] text-[#6B6B66] tracking-wide">NOM</label>
+                            <input
+                              value={emp.name}
+                              placeholder="Écrire un nom…"
+                              onChange={(e) => updateEmployee(emp.id, { name: e.target.value })}
+                              className="w-full bg-[#0D0D0D] border border-[#2A2A2A] rounded-lg px-2.5 py-1.5 text-[13px] mt-1 focus:outline-none focus:border-[#CCFF00]"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10.5px] text-[#6B6B66] tracking-wide">TITRE</label>
+                            <input
+                              value={emp.title}
+                              placeholder="Ex.: Coach principal…"
+                              onChange={(e) => updateEmployee(emp.id, { title: e.target.value })}
+                              className="w-full bg-[#0D0D0D] border border-[#2A2A2A] rounded-lg px-2.5 py-1.5 text-[13px] mt-1 focus:outline-none focus:border-[#CCFF00]"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[10.5px] text-[#6B6B66] tracking-wide">SALAIRE ANNUEL (CAD)</label>
+                            <input
+                              type="number" min={0} step={2500}
+                              value={emp.annualSalary}
+                              onChange={(e) => updateEmployee(emp.id, { annualSalary: Math.max(0, Number(e.target.value)) })}
+                              className="w-full bg-[#0D0D0D] border border-[#2A2A2A] rounded-lg px-2.5 py-1.5 text-[13px] mt-1 focus:outline-none focus:border-[#CCFF00]"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10.5px] text-[#6B6B66] tracking-wide">PARTICIPATION ESOP (%)</label>
+                            <input
+                              type="number" min={0} max={100} step={0.1}
+                              value={emp.esopParticipation}
+                              onChange={(e) => updateEmployee(emp.id, { esopParticipation: clamp(Number(e.target.value), 0, 100) })}
+                              className="w-full bg-[#0D0D0D] border border-[#2A2A2A] rounded-lg px-2.5 py-1.5 text-[13px] mt-1 focus:outline-none focus:border-[#CCFF00]"
+                            />
+                          </div>
+                        </div>
+                        <p className="text-[10.5px] text-[#6B6B66] -mt-2">
+                          La participation ESOP représente la part du pool de réserve (défini en haut de page) allouée à cette personne.
+                        </p>
+
+                        <div className="pt-2 border-t border-[#232323]">
+                          <span className="text-[10.5px] text-[#6B6B66] tracking-wide">RESPONSABILITÉS ({emp.responsibilities.length})</span>
+                          <div className="space-y-1.5 mt-2">
+                            {emp.responsibilities.map((resp) => (
+                              <div key={resp.id} className="flex items-center gap-1.5 bg-[#0D0D0D] border border-[#232323] rounded-lg px-2.5 py-1.5">
+                                <span className="flex-1 text-[12px] text-[#D5D5D0]">{resp.label}</span>
+                                <button
+                                  onClick={() => removeEmployeeResponsibility(emp.id, resp.id)}
+                                  title="Supprimer cette responsabilité"
+                                  className="text-[#6B6B66] hover:text-[#FF6B6B] flex-shrink-0"
+                                >
+                                  <X size={12} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="flex gap-2 mt-2">
+                            <input
+                              value={newEmpRespText[emp.id] || ""}
+                              onChange={(e) => setNewEmpRespText((t) => ({ ...t, [emp.id]: e.target.value }))}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  addEmployeeResponsibility(emp.id, newEmpRespText[emp.id] || "");
+                                  setNewEmpRespText((t) => ({ ...t, [emp.id]: "" }));
+                                }
+                              }}
+                              placeholder="Ajouter une responsabilité…"
+                              className="flex-1 bg-[#0D0D0D] border border-[#2A2A2A] rounded-lg px-2.5 py-1.5 text-[12px] focus:outline-none focus:border-[#CCFF00]"
+                            />
+                            <button
+                              onClick={() => {
+                                addEmployeeResponsibility(emp.id, newEmpRespText[emp.id] || "");
+                                setNewEmpRespText((t) => ({ ...t, [emp.id]: "" }));
+                              }}
+                              className="flex items-center gap-1 text-[12px] text-[#CCFF00] px-2 flex-shrink-0"
+                            >
+                              <Plus size={14} /> Ajouter
+                            </button>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => removeEmployee(emp.id)}
+                          className="flex items-center gap-1 text-[12px] text-[#FF6B6B] pt-1"
+                        >
+                          <Trash2 size={12} /> Retirer cet employé
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>
