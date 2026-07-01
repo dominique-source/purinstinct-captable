@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Plus, ChevronDown, RotateCcw, Users, History, ArrowRightLeft, Copy, X, Clock, AlertTriangle } from "lucide-react";
+import { Plus, ChevronDown, RotateCcw, Users, History, ArrowRightLeft, Copy, X, Clock, AlertTriangle, Sparkles, Info } from "lucide-react";
 import { db, authReady, firebaseEnabled } from "./firebase";
 import { collection, addDoc, updateDoc, doc, increment, serverTimestamp, query, orderBy, limit, onSnapshot } from "firebase/firestore";
 
@@ -139,10 +139,34 @@ const defaultCsuiteState = () => {
 
 function clamp(n, min, max) { return Math.min(max, Math.max(min, n)); }
 
+// ---- ÉQUITÉ SUGGÉRÉE — calcul local, n'écrit jamais dans le state csuite ----
+const EQUITY_WEIGHTS = { idea: 0.15, time: 0.20, risk: 0.20, execution: 0.25, capital: 0.10, network: 0.10 };
+
+function computeSuggestedEquity(factors, fteShare) {
+  const poidsBrut = FACTORS.reduce((sum, f) => sum + factors[f.key] * EQUITY_WEIGHTS[f.key], 0);
+  const poidsAjuste = poidsBrut * (fteShare / 100);
+  const scoreNormalise = poidsAjuste / 10;
+
+  const low = clamp(scoreNormalise * 8, 0.25, 12);
+  const high = clamp(scoreNormalise * 8 + 4, 1, 20);
+
+  const sorted = [...FACTORS].sort((a, b) => factors[b.key] - factors[a.key]);
+  const top = sorted.slice(0, 2);
+  const bottom = sorted.slice(-2);
+
+  const explanation =
+    `Suggéré autour de ${low.toFixed(1)}–${high.toFixed(1)}% pour ce rôle. ` +
+    `Porté principalement par « ${top[0].label} » et « ${top[1].label} » — ${top[0].hint.toLowerCase()}. ` +
+    `Moins pondéré par « ${bottom[1].label} », ce qui reflète un apport relatif plus faible sur ce critère pour ce rôle.`;
+
+  return { low, high, explanation, topFactors: top, bottomFactors: bottom };
+}
+
 export default function EquitySplitStudio() {
   // C-suite section state
   const [csuite, setCsuite] = useState(defaultCsuiteState);
   const [expandedCsuiteKey, setExpandedCsuiteKey] = useState(CSUITE_ROLES[0].key);
+  const [equityPopoverKey, setEquityPopoverKey] = useState(null);
   const [respTarget, setRespTarget] = useState({});
   const [newRespText, setNewRespText] = useState({});
 
@@ -304,6 +328,16 @@ export default function EquitySplitStudio() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [showHistory]);
+
+  // Fermer le popover "Équité suggérée" au clic extérieur
+  useEffect(() => {
+    if (!equityPopoverKey) return;
+    const onClick = (e) => {
+      if (!e.target.closest?.("[data-equity-popover]")) setEquityPopoverKey(null);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [equityPopoverKey]);
 
   const formatTime = (ts) => (ts?.toDate ? ts.toDate().toLocaleTimeString("fr-CA", { hour: "2-digit", minute: "2-digit" }) : "…");
   const formatDate = (ts) => (ts?.toDate ? ts.toDate().toLocaleDateString("fr-CA", { day: "numeric", month: "short" }) : "");
@@ -540,6 +574,42 @@ export default function EquitySplitStudio() {
                         />
                       </div>
                     </div>
+
+                    <div className="relative" data-equity-popover>
+                      <button
+                        onClick={() => setEquityPopoverKey(equityPopoverKey === r.key ? null : r.key)}
+                        className="flex items-center gap-1.5 text-[11.5px] font-semibold text-[#CCFF00] border border-[#CCFF00]/40 hover:border-[#CCFF00] rounded-full px-3 py-1.5 transition-colors"
+                      >
+                        <Sparkles size={12} /> Équité suggérée
+                      </button>
+
+                      {equityPopoverKey === r.key && (() => {
+                        const result = computeSuggestedEquity(csuite[r.key].factors, csuite[r.key].fteShare);
+                        return (
+                          <div className="absolute z-30 mt-2 w-[280px] bg-[#111111] border border-[#2A2A2A] rounded-xl p-4 shadow-2xl">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-[10.5px] tracking-[0.15em] text-[#CCFF00] font-semibold">FOURCHETTE SUGGÉRÉE</span>
+                              <button onClick={() => setEquityPopoverKey(null)} className="text-[#6B6B66] hover:text-[#F2F2ED]">
+                                <X size={13} />
+                              </button>
+                            </div>
+                            <div className="disp italic font-black text-[28px] leading-none mb-2" style={{ color: csuite[r.key].color }}>
+                              {result.low.toFixed(1)}–{result.high.toFixed(1)}%
+                            </div>
+                            <p className="text-[11.5px] text-[#B5B5AF] leading-relaxed">{result.explanation}</p>
+                            <div className="flex items-start gap-1.5 mt-3 pt-3 border-t border-[#232323]">
+                              <Info size={11} className="text-[#6B6B66] flex-shrink-0 mt-0.5" />
+                              <p className="text-[10px] text-[#6B6B66] leading-relaxed">
+                                Indicatif seulement, basé sur tes curseurs d'apport et inspiré de méthodes reconnues
+                                (Founder's Pie Calculator, Slicing Pie, The Founder's Dilemmas). N'écrit aucune valeur
+                                ailleurs dans l'outil — à toi de décider.
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+
                     <p className="text-[10.5px] text-[#6B6B66] -mt-2">
                       Ex.: un CFO fractionnaire à 1 jour/semaine &asymp; 20% de temps plein.
                     </p>
