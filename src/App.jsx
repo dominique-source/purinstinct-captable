@@ -225,6 +225,10 @@ export default function EquitySplitStudio() {
   const [expandedEmployeeId, setExpandedEmployeeId] = useState(null);
   const [newEmpRespText, setNewEmpRespText] = useState({});
 
+  // Comité aviseur — pas de salaire, un montant par réunion et une petite participation ESOP
+  const [advisors, setAdvisors] = useState([]);
+  const [expandedAdvisorId, setExpandedAdvisorId] = useState(null);
+
   // Historique (Firebase) — sessions de travail sauvegardées automatiquement
   const [history, setHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
@@ -264,6 +268,8 @@ export default function EquitySplitStudio() {
     setExpandedCsuiteKey(CSUITE_ROLES[0].key);
     setEmployees([]);
     setExpandedEmployeeId(null);
+    setAdvisors([]);
+    setExpandedAdvisorId(null);
   };
 
   const weightTotal = Object.values(weights).reduce((a, b) => a + b, 0);
@@ -409,6 +415,26 @@ export default function EquitySplitStudio() {
 
   const totalEmployeeEsop = employees.reduce((s, e) => s + (Number(e.esopParticipation) || 0), 0);
 
+  // ---- Comité aviseur ----
+  const addAdvisor = () => {
+    const id = crypto.randomUUID();
+    setAdvisors((as_) => [...as_, {
+      id, name: "", title: "", meetingFee: 0, esopParticipation: 0,
+    }]);
+    setExpandedAdvisorId(id);
+  };
+
+  const updateAdvisor = (id, patch) =>
+    setAdvisors((as_) => as_.map((a) => (a.id === id ? { ...a, ...patch } : a)));
+
+  const removeAdvisor = (id) => {
+    setAdvisors((as_) => as_.filter((a) => a.id !== id));
+    setExpandedAdvisorId((cur) => (cur === id ? null : cur));
+  };
+
+  const totalAdvisorEsop = advisors.reduce((s, a) => s + (Number(a.esopParticipation) || 0), 0);
+  const totalNonExecEsop = totalEmployeeEsop + totalAdvisorEsop;
+
   const addResponsibility = (roleKey, label) => {
     if (!label.trim()) return;
     setCsuite((c) => ({
@@ -490,7 +516,7 @@ export default function EquitySplitStudio() {
     raiseAmount, preMoney, topUpPool, topUpTarget,
     csuite, csuiteWeights, csuiteEsop,
     csuiteSeedRaise, csuiteSeedCap, csuiteSeedTopUpPool, csuiteSeedTopUpTarget,
-    employees,
+    employees, advisors,
   });
 
   const restoreSnapshot = async (snap) => {
@@ -545,6 +571,8 @@ export default function EquitySplitStudio() {
     setCsuiteSeedTopUpTarget(snap.csuiteSeedTopUpTarget ?? 15);
     setEmployees(snap.employees ?? []);
     setExpandedEmployeeId(null);
+    setAdvisors(snap.advisors ?? []);
+    setExpandedAdvisorId(null);
     setShowHistory(false);
     setConfirmRestoreId(null);
     // Restaurer une ancienne version démarre une nouvelle session — on ne veut pas
@@ -602,7 +630,7 @@ export default function EquitySplitStudio() {
     }, 2500);
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [method, founders, weights, esopPool, cliffMonths, vestMonths, raiseAmount, preMoney, topUpPool, topUpTarget, csuite, csuiteWeights, csuiteEsop, csuiteSeedRaise, csuiteSeedCap, csuiteSeedTopUpPool, csuiteSeedTopUpTarget, employees]);
+  }, [method, founders, weights, esopPool, cliffMonths, vestMonths, raiseAmount, preMoney, topUpPool, topUpTarget, csuite, csuiteWeights, csuiteEsop, csuiteSeedRaise, csuiteSeedCap, csuiteSeedTopUpPool, csuiteSeedTopUpTarget, employees, advisors]);
 
   // Fermer le tiroir d'historique avec Échap
   useEffect(() => {
@@ -1851,6 +1879,134 @@ export default function EquitySplitStudio() {
                           className="flex items-center gap-1 text-[12px] text-[#FF6B6B] pt-1"
                         >
                           <Trash2 size={12} /> Retirer cet employé
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ============================================================ */}
+      {/* COMITÉ AVISEUR                                                 */}
+      {/* ============================================================ */}
+      <div className="max-w-6xl mx-auto px-5 sm:px-8 mt-16">
+        <div className="border-t border-[#232323] pt-10">
+          <div className="flex items-center justify-between gap-4 mb-3">
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <Users size={14} className="text-[#CCFF00]" />
+                <span className="text-[11px] tracking-[0.25em] text-[#CCFF00] font-semibold">COMITÉ AVISEUR</span>
+              </div>
+              <h2 className="disp italic font-black text-[32px] sm:text-[42px] leading-[0.95] tracking-tight">
+                Advisory Board
+              </h2>
+            </div>
+            <button
+              onClick={addAdvisor}
+              className="flex items-center gap-1.5 text-[13px] font-medium text-[#0D0D0D] bg-[#CCFF00] hover:brightness-110 rounded-full px-4 py-2 transition-[filter] flex-shrink-0"
+            >
+              <Plus size={14} /> Ajouter un membre
+            </button>
+          </div>
+          <p className="text-[#9A9A94] text-sm max-w-2xl leading-relaxed mb-6">
+            Membres du comité aviseur &mdash; pas de salaire, mais un montant remis à chaque réunion et une petite participation au pool ESOP.
+          </p>
+
+          {advisors.length > 0 && (
+            <div className="flex items-center justify-between text-[12.5px] bg-[#151515] border border-[#232323] rounded-2xl px-5 py-3 mb-4">
+              <span className="text-[#8A8A85]">Participation ESOP totale allouée au comité aviseur</span>
+              <span className={`font-mono font-semibold ${totalNonExecEsop > esopPool ? "text-[#FF6B6B]" : "text-[#CCFF00]"}`}>
+                {totalAdvisorEsop.toFixed(1)}% / {esopPool}% (pool)
+              </span>
+            </div>
+          )}
+          {totalNonExecEsop > esopPool && (
+            <p className="text-[11px] text-[#FF6B6B] -mt-2 mb-4">
+              La participation cumulée (employés + comité aviseur = {totalNonExecEsop.toFixed(1)}%) dépasse la réserve ESOP définie en haut de page ({esopPool}%) &mdash; augmente le pool ou réduis les participations.
+            </p>
+          )}
+
+          {advisors.length === 0 ? (
+            <div className="bg-[#151515] border border-[#232323] border-dashed rounded-2xl p-8 text-center">
+              <p className="text-[13px] text-[#8A8A85]">Aucun membre du comité aviseur ajouté pour l'instant.</p>
+              <p className="text-[11.5px] text-[#6B6B66] mt-1.5">Clique sur "Ajouter un membre" pour commencer.</p>
+            </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2">
+              {advisors.map((adv) => {
+                const isOpen = expandedAdvisorId === adv.id;
+                return (
+                  <div key={adv.id} className="bg-[#151515] border border-[#232323] rounded-2xl overflow-hidden self-start">
+                    <button
+                      onClick={() => setExpandedAdvisorId(isOpen ? null : adv.id)}
+                      className="w-full p-4 flex items-center gap-3 text-left"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[14px] font-semibold truncate">{adv.name || "Nouveau membre"}</div>
+                        <div className="text-[12px] text-[#8A8A85] truncate">{adv.title || "Expertise à définir"}</div>
+                      </div>
+                      {adv.esopParticipation > 0 && (
+                        <div className="disp italic font-black text-[18px] text-[#F2F2ED] flex-shrink-0">{adv.esopParticipation}%</div>
+                      )}
+                      <ChevronDown size={16} className={`text-[#666] transition-transform flex-shrink-0 ${isOpen ? "rotate-180" : ""}`} />
+                    </button>
+
+                    {isOpen && (
+                      <div className="px-4 pb-5 pt-1 border-t border-[#232323] space-y-4">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[10.5px] text-[#6B6B66] tracking-wide">NOM</label>
+                            <input
+                              value={adv.name}
+                              placeholder="Écrire un nom…"
+                              onChange={(e) => updateAdvisor(adv.id, { name: e.target.value })}
+                              className="w-full bg-[#0D0D0D] border border-[#2A2A2A] rounded-lg px-2.5 py-1.5 text-[13px] mt-1 focus:outline-none focus:border-[#CCFF00]"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10.5px] text-[#6B6B66] tracking-wide">EXPERTISE / RÔLE</label>
+                            <input
+                              value={adv.title}
+                              placeholder="Ex.: Marketing, Finance…"
+                              onChange={(e) => updateAdvisor(adv.id, { title: e.target.value })}
+                              className="w-full bg-[#0D0D0D] border border-[#2A2A2A] rounded-lg px-2.5 py-1.5 text-[13px] mt-1 focus:outline-none focus:border-[#CCFF00]"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[10.5px] text-[#6B6B66] tracking-wide">MONTANT PAR RÉUNION (CAD)</label>
+                            <input
+                              type="number" min={0} step={50}
+                              value={adv.meetingFee}
+                              onChange={(e) => updateAdvisor(adv.id, { meetingFee: Math.max(0, Number(e.target.value)) })}
+                              className="w-full bg-[#0D0D0D] border border-[#2A2A2A] rounded-lg px-2.5 py-1.5 text-[13px] mt-1 focus:outline-none focus:border-[#CCFF00]"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10.5px] text-[#6B6B66] tracking-wide">PARTICIPATION ESOP (%)</label>
+                            <input
+                              type="number" min={0} max={100} step={0.1}
+                              value={adv.esopParticipation}
+                              onChange={(e) => updateAdvisor(adv.id, { esopParticipation: clamp(Number(e.target.value), 0, 100) })}
+                              className="w-full bg-[#0D0D0D] border border-[#2A2A2A] rounded-lg px-2.5 py-1.5 text-[13px] mt-1 focus:outline-none focus:border-[#CCFF00]"
+                            />
+                          </div>
+                        </div>
+                        <p className="text-[10.5px] text-[#6B6B66] -mt-2">
+                          Pas de salaire pour les membres du comité aviseur &mdash; seulement un jeton de présence par réunion et une petite participation au pool ESOP.
+                        </p>
+
+                        <button
+                          onClick={() => removeAdvisor(adv.id)}
+                          className="flex items-center gap-1 text-[12px] text-[#FF6B6B] pt-1"
+                        >
+                          <Trash2 size={12} /> Retirer ce membre
                         </button>
                       </div>
                     )}
