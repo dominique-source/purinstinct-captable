@@ -48,8 +48,8 @@ const CSUITE_ROLES = [
   {
     key: "coo",
     title: "COO",
-    scope: "Opérations & exécution",
-    desc: "Livraison des événements PürInstinct Games, coordination des équipes terrain, scalabilité de l'opération.",
+    scope: "Business development & opérations stratégiques",
+    desc: "Partenaire direct du CEO — développement d'affaires, partenariats, présence dans les rencontres stratégiques, structuration des opérations à l'échelle de l'entreprise. Ne gère pas l'exécution terrain des événements (voir Logistique & production événement).",
     fte: "Temps plein",
   },
   {
@@ -70,7 +70,7 @@ const CSUITE_ROLES = [
     key: "logistics",
     title: "Logistique & production événement",
     scope: "Exécution terrain",
-    desc: "Calendrier des événements, billetterie, matériel, animation et formation des coachs sur site.",
+    desc: "Propriétaire complet de l'événementiel — calendrier des événements, billetterie, matériel, animation et formation des coachs sur site. Rôle distinct du COO, qui se concentre sur le développement d'affaires.",
     fte: "Temps plein",
   },
   {
@@ -750,7 +750,14 @@ export default function EquitySplitStudio() {
                     <div className="p-4 flex items-center gap-3" style={{ borderLeft: `4px solid ${r.color}` }}>
                       <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: r.color }} />
                       <div className="flex-1 min-w-0">
-                        <div className="text-[14px] font-semibold">{r.title}</div>
+                        <div className="flex items-center gap-2">
+                          <div className="text-[14px] font-semibold">{r.title}</div>
+                          {r.pct < 10 && (
+                            <span className="text-[9.5px] tracking-wide uppercase text-[#0D0D0D] bg-[#CCFF00] rounded-full px-2 py-0.5 font-semibold flex-shrink-0">
+                              Premier employé
+                            </span>
+                          )}
+                        </div>
                         <div className="text-[11px] text-[#8A8A85]">{r.scope} &middot; {r.fte}</div>
                       </div>
                       <div className="disp italic font-black text-[22px] text-[#F2F2ED]">{r.pct.toFixed(1)}%</div>
@@ -822,6 +829,11 @@ export default function EquitySplitStudio() {
                         <div className="truncate">
                           <span className="text-[#D5D5D0]">{r.title}</span>
                           {r.name && <span className="text-[#8A8A85]"> &mdash; {r.name}</span>}
+                          {r.pct < 10 && (
+                            <span className="ml-1.5 text-[9px] tracking-wide uppercase text-[#0D0D0D] bg-[#CCFF00] rounded-full px-1.5 py-0.5 font-semibold">
+                              Premier employé
+                            </span>
+                          )}
                         </div>
                       </div>
                       <span className="font-mono text-[#F2F2ED] font-semibold flex-shrink-0">{r.pct.toFixed(1)}%</span>
