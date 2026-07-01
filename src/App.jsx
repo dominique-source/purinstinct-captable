@@ -152,6 +152,7 @@ const defaultCsuiteState = () => {
       name: "",
       linkedFounderId: null, // si lié à un fondateur, le nom et les curseurs sont synchronisés depuis la section Fondateurs
       fteShare: 100, // % of full-time equivalent — lets you mark someone as 0.5 FTE etc.
+      annualSalary: 0,
       factors: { idea: 3, time: 6, risk: 3, execution: 6, capital: 1, network: 3 },
       color: csuiteColor(i),
       cliffMonths: 12,
@@ -1292,6 +1293,16 @@ export default function EquitySplitStudio() {
                             className="w-full bg-[#0D0D0D] border border-[#2A2A2A] rounded-lg px-2.5 py-1.5 text-[13px] mt-1 focus:outline-none focus:border-[#CCFF00]"
                           />
                         </div>
+                      </div>
+
+                      <div>
+                        <label className="text-[10.5px] text-[#6B6B66] tracking-wide">SALAIRE ANNUEL OFFERT (CAD)</label>
+                        <input
+                          type="number" min={0} step={5000}
+                          value={csuite[r.key].annualSalary}
+                          onChange={(e) => updateCsuiteField(r.key, { annualSalary: Math.max(0, Number(e.target.value)) })}
+                          className="w-full bg-[#0D0D0D] border border-[#2A2A2A] rounded-lg px-2.5 py-1.5 text-[13px] mt-1 focus:outline-none focus:border-[#CCFF00]"
+                        />
                       </div>
 
                       <div className="flex items-center gap-2">
