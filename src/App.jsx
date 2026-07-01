@@ -1,6 +1,8 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
-import { Plus, Trash2, Info, TrendingUp, ShieldCheck, ChevronDown, RotateCcw, Users } from "lucide-react";
+import { Plus, Trash2, Info, TrendingUp, ShieldCheck, ChevronDown, RotateCcw, Users, History } from "lucide-react";
+import { db, authReady, firebaseEnabled } from "./firebase";
+import { collection, addDoc, serverTimestamp, query, orderBy, limit, onSnapshot } from "firebase/firestore";
 
 const FOUNDER_COLORS = ["#CCFF00", "#7C9EFF", "#FF6B6B", "#4FD1C5", "#F5A623", "#C792EA"];
 
@@ -128,6 +130,13 @@ export default function EquitySplitStudio() {
   const [csuiteSeedCap, setCsuiteSeedCap] = useState(4000000);
   const [csuiteSeedTopUpPool, setCsuiteSeedTopUpPool] = useState(true);
   const [csuiteSeedTopUpTarget, setCsuiteSeedTopUpTarget] = useState(15);
+
+  // Historique (Firebase) — snapshots automatiques de l'état complet
+  const [history, setHistory] = useState([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const restoringRef = useRef(false);
+  const lastSavedRef = useRef(null);
+  const saveTimerRef = useRef(null);
 
   const resetAll = () => {
     const fresh = getInitialFounders();
@@ -273,6 +282,73 @@ export default function EquitySplitStudio() {
     return { investorPct, roles, poolPost, postMoney: csuiteSeedCap };
   }, [csuiteResults, csuiteEsop, csuiteSeedRaise, csuiteSeedCap, csuiteSeedTopUpPool, csuiteSeedTopUpTarget]);
 
+  const snapshotState = () => ({
+    method, founders, weights, esopPool, cliffMonths, vestMonths,
+    raiseAmount, preMoney, topUpPool, topUpTarget,
+    csuite, csuiteWeights, csuiteEsop,
+    csuiteSeedRaise, csuiteSeedCap, csuiteSeedTopUpPool, csuiteSeedTopUpTarget,
+  });
+
+  const restoreSnapshot = (snap) => {
+    restoringRef.current = true;
+    setMethod(snap.method);
+    setFounders(snap.founders);
+    setWeights(snap.weights);
+    setEsopPool(snap.esopPool);
+    setCliffMonths(snap.cliffMonths);
+    setVestMonths(snap.vestMonths);
+    setRaiseAmount(snap.raiseAmount);
+    setPreMoney(snap.preMoney);
+    setTopUpPool(snap.topUpPool);
+    setTopUpTarget(snap.topUpTarget);
+    setCsuite(snap.csuite);
+    setCsuiteWeights(snap.csuiteWeights);
+    setCsuiteEsop(snap.csuiteEsop);
+    setCsuiteSeedRaise(snap.csuiteSeedRaise ?? 500000);
+    setCsuiteSeedCap(snap.csuiteSeedCap ?? 4000000);
+    setCsuiteSeedTopUpPool(snap.csuiteSeedTopUpPool ?? true);
+    setCsuiteSeedTopUpTarget(snap.csuiteSeedTopUpTarget ?? 15);
+    setShowHistory(false);
+    setTimeout(() => { restoringRef.current = false; }, 0);
+  };
+
+  // Écoute les 30 derniers snapshots d'historique
+  useEffect(() => {
+    if (!firebaseEnabled) return;
+    const q = query(collection(db, "captable_history"), orderBy("createdAt", "desc"), limit(30));
+    const unsub = onSnapshot(q, (snap) => {
+      setHistory(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    });
+    return unsub;
+  }, []);
+
+  // Sauvegarde automatique (débounce 2.5s) à chaque changement significatif
+  useEffect(() => {
+    if (!firebaseEnabled) return;
+    if (restoringRef.current) return;
+    const snap = snapshotState();
+    const serialized = JSON.stringify(snap);
+    if (serialized === lastSavedRef.current) return;
+
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(async () => {
+      try {
+        await authReady;
+        await addDoc(collection(db, "captable_history"), { data: snap, createdAt: serverTimestamp() });
+        lastSavedRef.current = serialized;
+      } catch (err) {
+        console.error("Sauvegarde historique échouée", err);
+      }
+    }, 2500);
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [method, founders, weights, esopPool, cliffMonths, vestMonths, raiseAmount, preMoney, topUpPool, topUpTarget, csuite, csuiteWeights, csuiteEsop, csuiteSeedRaise, csuiteSeedCap, csuiteSeedTopUpPool, csuiteSeedTopUpTarget]);
+
+  const formatHistoryDate = (ts) => {
+    if (!ts?.toDate) return "…";
+    return ts.toDate().toLocaleString("fr-CA", { dateStyle: "medium", timeStyle: "short" });
+  };
+
   return (
     <div style={{ fontFamily: "'Inter', system-ui, sans-serif" }} className="min-h-screen bg-[#0D0D0D] text-[#F2F2ED] pb-24">
       <style>{`
@@ -289,13 +365,48 @@ export default function EquitySplitStudio() {
         <div className="max-w-6xl mx-auto">
           <div className="flex items-start justify-between gap-4">
             <div className="text-[11px] tracking-[0.25em] text-[#CCFF00] font-semibold mb-2">SPLIT ÉQUITABLE — OUTIL DE DÉCISION</div>
-            <button
-              onClick={resetAll}
-              className="flex items-center gap-1.5 text-[12px] text-[#9A9A94] hover:text-[#CCFF00] border border-[#2A2A2A] hover:border-[#CCFF00] rounded-full px-3 py-1.5 transition-colors flex-shrink-0"
-            >
-              <RotateCcw size={12} /> Remise à zéro
-            </button>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {firebaseEnabled && (
+                <button
+                  onClick={() => setShowHistory((s) => !s)}
+                  className="flex items-center gap-1.5 text-[12px] text-[#9A9A94] hover:text-[#CCFF00] border border-[#2A2A2A] hover:border-[#CCFF00] rounded-full px-3 py-1.5 transition-colors"
+                >
+                  <History size={12} /> Historique
+                </button>
+              )}
+              <button
+                onClick={resetAll}
+                className="flex items-center gap-1.5 text-[12px] text-[#9A9A94] hover:text-[#CCFF00] border border-[#2A2A2A] hover:border-[#CCFF00] rounded-full px-3 py-1.5 transition-colors"
+              >
+                <RotateCcw size={12} /> Remise à zéro
+              </button>
+            </div>
           </div>
+
+          {showHistory && (
+            <div className="mb-4 bg-[#151515] border border-[#232323] rounded-2xl p-4 max-h-72 overflow-y-auto scrollbar-thin">
+              <div className="text-[11px] tracking-[0.2em] text-[#9A9A94] font-semibold mb-2">
+                HISTORIQUE — {history.length} version{history.length > 1 ? "s" : ""} sauvegardée{history.length > 1 ? "s" : ""} automatiquement
+              </div>
+              {history.length === 0 && (
+                <p className="text-[12px] text-[#6B6B66]">Aucune version enregistrée pour l'instant — les changements se sauvegardent automatiquement quelques secondes après chaque modification.</p>
+              )}
+              <div className="space-y-1.5">
+                {history.map((h) => (
+                  <div key={h.id} className="flex items-center justify-between gap-3 text-[12.5px] py-1.5 border-b border-[#232323] last:border-0">
+                    <span className="text-[#B5B5AF]">{formatHistoryDate(h.createdAt)}</span>
+                    <button
+                      onClick={() => restoreSnapshot(h.data)}
+                      className="text-[11px] text-[#CCFF00] hover:underline flex-shrink-0"
+                    >
+                      Restaurer
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <h1 className="disp italic font-black text-[40px] sm:text-[56px] leading-[0.92] tracking-tight">
             Equity Split<br />Studio
           </h1>
