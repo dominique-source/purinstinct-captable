@@ -92,6 +92,8 @@ const defaultCsuiteState = () => {
       fteShare: 100, // % of full-time equivalent — lets you mark someone as 0.5 FTE etc.
       factors: { idea: 3, time: 6, risk: 3, execution: 6, capital: 1, network: 3 },
       color: csuiteColor(i),
+      cliffMonths: 12,
+      vestMonths: 48,
     };
   });
   return st;
@@ -120,6 +122,13 @@ export default function EquitySplitStudio() {
   const [csuiteTab, setCsuiteTab] = useState("individual"); // "individual" | "category"
   const [csuiteEsop, setCsuiteEsop] = useState(12);
 
+  // C-suite Seed Round (SAFE) simulation
+  const [showCsuiteSeed, setShowCsuiteSeed] = useState(false);
+  const [csuiteSeedRaise, setCsuiteSeedRaise] = useState(500000);
+  const [csuiteSeedCap, setCsuiteSeedCap] = useState(4000000);
+  const [csuiteSeedTopUpPool, setCsuiteSeedTopUpPool] = useState(true);
+  const [csuiteSeedTopUpTarget, setCsuiteSeedTopUpTarget] = useState(15);
+
   const resetAll = () => {
     const fresh = getInitialFounders();
     setMethod("value");
@@ -139,6 +148,11 @@ export default function EquitySplitStudio() {
     setCsuiteWeights(DEFAULT_WEIGHTS);
     setCsuiteTab("individual");
     setCsuiteEsop(12);
+    setShowCsuiteSeed(false);
+    setCsuiteSeedRaise(500000);
+    setCsuiteSeedCap(4000000);
+    setCsuiteSeedTopUpPool(true);
+    setCsuiteSeedTopUpTarget(15);
   };
 
   const weightTotal = Object.values(weights).reduce((a, b) => a + b, 0);
@@ -241,6 +255,23 @@ export default function EquitySplitStudio() {
     arr.push({ name: "Pool ESOP (réserve)", value: csuiteEsop, color: "#3A3A3A" });
     return arr;
   }, [csuiteResults, csuiteEsop]);
+
+  // Seed Round (SAFE, valuation cap post-money) — dilution appliquée à la structure de direction
+  const csuiteSeedResults = useMemo(() => {
+    const investorPct = csuiteSeedCap > 0 ? (csuiteSeedRaise / csuiteSeedCap) * 100 : 0;
+    const remainingBeforeInvestor = 100 - investorPct;
+    const currentTotal = 100 - csuiteEsop;
+    const targetPool = csuiteSeedTopUpPool ? Math.max(csuiteEsop, csuiteSeedTopUpTarget) : csuiteEsop;
+    const totalAfterTopUp = 100 - targetPool;
+    const shrinkFactor = currentTotal > 0 ? totalAfterTopUp / currentTotal : 1;
+    const factor = remainingBeforeInvestor / 100;
+    const roles = csuiteResults.map((r) => {
+      const preRoundPct = r.pct * shrinkFactor;
+      return { ...r, preRoundPct, postPct: preRoundPct * factor };
+    });
+    const poolPost = targetPool * factor;
+    return { investorPct, roles, poolPost, postMoney: csuiteSeedCap };
+  }, [csuiteResults, csuiteEsop, csuiteSeedRaise, csuiteSeedCap, csuiteSeedTopUpPool, csuiteSeedTopUpTarget]);
 
   return (
     <div style={{ fontFamily: "'Inter', system-ui, sans-serif" }} className="min-h-screen bg-[#0D0D0D] text-[#F2F2ED] pb-24">
@@ -790,6 +821,36 @@ export default function EquitySplitStudio() {
                         Ex.: un CFO fractionnaire à 1 jour/semaine &asymp; 20%. Ça réduit sa part sans changer ses curseurs de contribution ci-dessous.
                       </p>
 
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10.5px] text-[#6B6B66] tracking-wide">CLIFF (MOIS)</label>
+                          <input
+                            type="number" min={0} max={24} step={1}
+                            value={csuite[r.key].cliffMonths}
+                            onChange={(e) => updateCsuiteField(r.key, { cliffMonths: clamp(Number(e.target.value), 0, 24) })}
+                            className="w-full bg-[#0D0D0D] border border-[#2A2A2A] rounded-lg px-2.5 py-1.5 text-[13px] mt-1 focus:outline-none focus:border-[#CCFF00]"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10.5px] text-[#6B6B66] tracking-wide">VESTING TOTAL (MOIS)</label>
+                          <input
+                            type="number" min={12} max={60} step={1}
+                            value={csuite[r.key].vestMonths}
+                            onChange={(e) => updateCsuiteField(r.key, { vestMonths: clamp(Number(e.target.value), 12, 60) })}
+                            className="w-full bg-[#0D0D0D] border border-[#2A2A2A] rounded-lg px-2.5 py-1.5 text-[13px] mt-1 focus:outline-none focus:border-[#CCFF00]"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <div className="relative h-1.5 bg-[#232323] rounded-full overflow-hidden">
+                          <div className="absolute h-full bg-[#3A3A3A]" style={{ width: `${(csuite[r.key].cliffMonths / csuite[r.key].vestMonths) * 100}%` }} />
+                          <div className="absolute h-full" style={{ background: r.color, left: `${(csuite[r.key].cliffMonths / csuite[r.key].vestMonths) * 100}%`, width: `${100 - (csuite[r.key].cliffMonths / csuite[r.key].vestMonths) * 100}%` }} />
+                        </div>
+                        <p className="text-[10.5px] text-[#6B6B66] mt-1.5">
+                          Avant le mois {csuite[r.key].cliffMonths}&nbsp;: 0% acquis. Au cliff&nbsp;: {(100 / csuite[r.key].vestMonths * csuite[r.key].cliffMonths).toFixed(0)}% débloqué d'un coup. 100% acquis au mois {csuite[r.key].vestMonths}.
+                        </p>
+                      </div>
+
                       {csuiteTab === "individual" && (
                         <div className="space-y-2.5 pt-1">
                           {FACTORS.map((fac) => (
@@ -847,6 +908,82 @@ export default function EquitySplitStudio() {
                     <span className="font-mono text-[#8A8A85]">{csuiteEsop}%</span>
                   </div>
                 </div>
+              </div>
+
+              {/* Seed Round simulation (SAFE, valuation cap) */}
+              <div className="bg-[#151515] border border-[#232323] rounded-2xl overflow-hidden">
+                <button
+                  onClick={() => setShowCsuiteSeed((s) => !s)}
+                  className="w-full flex items-center justify-between p-5 text-left"
+                >
+                  <div className="flex items-center gap-2">
+                    <TrendingUp size={13} className="text-[#CCFF00]" />
+                    <span className="text-[11px] tracking-[0.2em] text-[#9A9A94] font-semibold">SIMULER UN SEED ROUND (SAFE)</span>
+                  </div>
+                  <ChevronDown size={16} className={`text-[#666] transition-transform ${showCsuiteSeed ? "rotate-180" : ""}`} />
+                </button>
+
+                {showCsuiteSeed && (
+                  <div className="px-5 pb-5 pt-0 space-y-4 border-t border-[#232323]">
+                    <div className="grid grid-cols-2 gap-3 pt-4">
+                      <div>
+                        <label className="text-[10.5px] text-[#6B6B66] tracking-wide">MONTANT LEVÉ (CAD)</label>
+                        <input type="number" value={csuiteSeedRaise} step={25000}
+                          onChange={(e) => setCsuiteSeedRaise(Number(e.target.value))}
+                          className="w-full bg-[#0D0D0D] border border-[#2A2A2A] rounded-lg px-2.5 py-1.5 text-[13px] mt-1 focus:outline-none focus:border-[#CCFF00]" />
+                      </div>
+                      <div>
+                        <label className="text-[10.5px] text-[#6B6B66] tracking-wide">VALUATION CAP (CAD, post-money)</label>
+                        <input type="number" value={csuiteSeedCap} step={100000}
+                          onChange={(e) => setCsuiteSeedCap(Number(e.target.value))}
+                          className="w-full bg-[#0D0D0D] border border-[#2A2A2A] rounded-lg px-2.5 py-1.5 text-[13px] mt-1 focus:outline-none focus:border-[#CCFF00]" />
+                      </div>
+                    </div>
+                    <p className="text-[10.5px] text-[#6B6B66] -mt-2">Le cap détermine la valorisation maximale à laquelle les investisseurs SAFE convertissent, peu importe la valorisation de la prochaine ronde priced. Différents caps ou différents montants levés donnent des scénarios de dilution différents à tester ici.</p>
+
+                    <label className="flex items-center gap-2 text-[12px] text-[#B5B5AF]">
+                      <input type="checkbox" checked={csuiteSeedTopUpPool} onChange={(e) => setCsuiteSeedTopUpPool(e.target.checked)}
+                        className="accent-[#CCFF00]" />
+                      Recharger le pool ESOP à
+                      <input type="number" value={csuiteSeedTopUpTarget} disabled={!csuiteSeedTopUpPool} step={1}
+                        onChange={(e) => setCsuiteSeedTopUpTarget(Number(e.target.value))}
+                        className="w-14 bg-[#0D0D0D] border border-[#2A2A2A] rounded-lg px-2 py-1 text-[12px] disabled:opacity-40" />
+                      % avant la ronde
+                    </label>
+
+                    <div className="bg-[#0D0D0D] border border-[#232323] rounded-xl p-4">
+                      <div className="flex justify-between text-[12.5px] mb-3">
+                        <span className="text-[#8A8A85]">Valorisation post-money (cap)</span>
+                        <span className="font-mono text-[#F2F2ED]">{csuiteSeedResults.postMoney.toLocaleString("fr-CA")} $</span>
+                      </div>
+                      <div className="flex justify-between text-[12.5px] mb-3 pb-3 border-b border-[#232323]">
+                        <span className="text-[#8A8A85]">Investisseurs Seed (SAFE)</span>
+                        <span className="font-mono text-[#CCFF00] font-semibold">{csuiteSeedResults.investorPct.toFixed(1)}%</span>
+                      </div>
+                      <div className="space-y-2">
+                        {csuiteSeedResults.roles.map((r) => (
+                          <div key={r.key} className="flex items-center justify-between text-[13px]">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: r.color }} />
+                              <span className="truncate text-[#D5D5D0]">{r.title}</span>
+                            </div>
+                            <div className="text-right flex-shrink-0">
+                              <span className="font-mono text-[#F2F2ED] font-semibold">{r.postPct.toFixed(1)}%</span>
+                              <span className="text-[10.5px] text-[#6B6B66] ml-1.5">(avant: {r.pct.toFixed(1)}%)</span>
+                            </div>
+                          </div>
+                        ))}
+                        <div className="flex justify-between text-[13px] pt-1 border-t border-[#232323]">
+                          <span className="text-[#8A8A85]">Pool ESOP</span>
+                          <span className="font-mono text-[#8A8A85]">{csuiteSeedResults.poolPost.toFixed(1)}%</span>
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-[#6B6B66] leading-relaxed">
+                      Le SAFE convertit au cap au prochain tour priced &mdash; la dilution ici vient uniquement de l'équipe de direction, pas des investisseurs déjà en place. Compare différents montants et différents caps pour voir l'impact sur chaque rôle.
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="bg-[#151515] border border-[#232323] rounded-2xl p-5">
