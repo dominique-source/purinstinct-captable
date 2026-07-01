@@ -150,6 +150,7 @@ const defaultCsuiteState = () => {
   CSUITE_ROLES.forEach((r, i) => {
     st[r.key] = {
       name: "",
+      linkedFounderId: null, // si lié à un fondateur, le nom et les curseurs sont synchronisés depuis la section Fondateurs
       fteShare: 100, // % of full-time equivalent — lets you mark someone as 0.5 FTE etc.
       factors: { idea: 3, time: 6, risk: 3, execution: 6, capital: 1, network: 3 },
       color: csuiteColor(i),
@@ -281,6 +282,14 @@ export default function EquitySplitStudio() {
   const removeFounder = (id) => {
     if (founders.length <= 1) return;
     setFounders((fs) => fs.filter((f) => f.id !== id));
+    // Détache tout rôle C-suite lié à ce fondateur pour éviter une référence orpheline.
+    setCsuite((c) => {
+      const next = { ...c };
+      Object.keys(next).forEach((key) => {
+        if (next[key].linkedFounderId === id) next[key] = { ...next[key], linkedFounderId: null };
+      });
+      return next;
+    });
   };
 
   const results = useMemo(() => {
@@ -335,6 +344,32 @@ export default function EquitySplitStudio() {
   const updateCsuiteField = (key, patch) =>
     setCsuite((c) => ({ ...c, [key]: { ...c[key], ...patch } }));
 
+  // Lie un rôle C-suite à un fondateur — le nom et les curseurs de contribution
+  // deviennent alors un miroir en direct de la section Fondateurs plus haut.
+  const linkCsuiteToFounder = (key, founderId) =>
+    setCsuite((c) => ({ ...c, [key]: { ...c[key], linkedFounderId: founderId || null } }));
+
+  // Détache un rôle C-suite d'un fondateur, en gardant les dernières valeurs
+  // synchronisées comme point de départ indépendant.
+  const unlinkCsuiteFromFounder = (key, currentName, currentFactors) =>
+    setCsuite((c) => ({
+      ...c,
+      [key]: { ...c[key], linkedFounderId: null, name: currentName, factors: { ...currentFactors } },
+    }));
+
+  // Résout le nom/facteurs effectifs d'un rôle C-suite : ceux du fondateur lié s'il y en a un,
+  // sinon les valeurs propres au rôle.
+  const getEffectiveCsuiteData = (key) => {
+    const c = csuite[key];
+    const linkedFounder = c.linkedFounderId ? founders.find((f) => f.id === c.linkedFounderId) : null;
+    return {
+      name: linkedFounder ? linkedFounder.name : c.name,
+      factors: linkedFounder ? linkedFounder.factors : c.factors,
+      isLinked: Boolean(linkedFounder),
+      linkedFounder,
+    };
+  };
+
   const addResponsibility = (roleKey, label) => {
     if (!label.trim()) return;
     setCsuite((c) => ({
@@ -372,7 +407,8 @@ export default function EquitySplitStudio() {
     const available = 100 - csuiteEsop;
     const scores = CSUITE_ROLES.map((r) => {
       const f = csuite[r.key];
-      const rawFullTime = FACTORS.reduce((s, fac) => s + f.factors[fac.key] * (csuiteWeights[fac.key] || 0), 0);
+      const eff = getEffectiveCsuiteData(r.key);
+      const rawFullTime = FACTORS.reduce((s, fac) => s + eff.factors[fac.key] * (csuiteWeights[fac.key] || 0), 0);
       // scale by FTE share — someone at 50% time gets 50% of their raw score
       const raw = rawFullTime * (f.fteShare / 100);
       return { key: r.key, raw };
@@ -381,9 +417,11 @@ export default function EquitySplitStudio() {
     return CSUITE_ROLES.map((r) => {
       const raw = scores.find((s) => s.key === r.key).raw;
       const pct = (raw / totalRaw) * available;
-      return { ...r, ...csuite[r.key], pct, raw };
+      const eff = getEffectiveCsuiteData(r.key);
+      return { ...r, ...csuite[r.key], name: eff.name, factors: eff.factors, isLinked: eff.isLinked, linkedFounder: eff.linkedFounder, pct, raw };
     });
-  }, [csuite, csuiteWeights, csuiteEsop]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [csuite, csuiteWeights, csuiteEsop, founders]);
 
   const csuitePieData = useMemo(() => {
     const arr = csuiteResults.map((r) => ({ name: r.name || r.title, value: Number(r.pct.toFixed(2)), color: r.color }));
@@ -1232,12 +1270,18 @@ export default function EquitySplitStudio() {
                       <div className="grid grid-cols-2 gap-3">
                         <div>
                           <label className="text-[10.5px] text-[#6B6B66] tracking-wide">NOM PRESSENTI</label>
-                          <input
-                            value={csuite[r.key].name}
-                            placeholder="Écrire un nom…"
-                            onChange={(e) => updateCsuiteField(r.key, { name: e.target.value })}
-                            className="w-full bg-[#0D0D0D] border border-[#2A2A2A] rounded-lg px-2.5 py-1.5 text-[13px] mt-1 focus:outline-none focus:border-[#CCFF00]"
-                          />
+                          {r.isLinked ? (
+                            <div className="w-full bg-[#0D0D0D] border border-[#CCFF00]/40 rounded-lg px-2.5 py-1.5 text-[13px] mt-1 text-[#F2F2ED] truncate">
+                              {r.name}
+                            </div>
+                          ) : (
+                            <input
+                              value={csuite[r.key].name}
+                              placeholder="Écrire un nom…"
+                              onChange={(e) => updateCsuiteField(r.key, { name: e.target.value })}
+                              className="w-full bg-[#0D0D0D] border border-[#2A2A2A] rounded-lg px-2.5 py-1.5 text-[13px] mt-1 focus:outline-none focus:border-[#CCFF00]"
+                            />
+                          )}
                         </div>
                         <div>
                           <label className="text-[10.5px] text-[#6B6B66] tracking-wide">IMPLICATION (% temps plein)</label>
@@ -1250,6 +1294,29 @@ export default function EquitySplitStudio() {
                         </div>
                       </div>
 
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-[#6B6B66] tracking-wide">ASSOCIER À</span>
+                        <select
+                          value={csuite[r.key].linkedFounderId || ""}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (!val) unlinkCsuiteFromFounder(r.key, r.name, r.factors);
+                            else linkCsuiteToFounder(r.key, val);
+                          }}
+                          className="bg-[#0D0D0D] border border-[#2A2A2A] rounded-lg px-2 py-1 text-[11.5px] text-[#B5B5AF] focus:outline-none focus:border-[#CCFF00]"
+                        >
+                          <option value="">Aucun (nom et curseurs manuels)</option>
+                          {founders.map((f) => (
+                            <option key={f.id} value={f.id}>{f.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      {r.isLinked && (
+                        <p className="text-[10.5px] text-[#6B6B66] -mt-2">
+                          Synchronisé avec la section Fondateurs plus haut &mdash; modifie le nom et les curseurs de {r.linkedFounder?.name.split(" ")[0]} là-bas, ça se répercute ici automatiquement.
+                        </p>
+                      )}
+
                       <div className="relative" data-equity-popover>
                         <button
                           onClick={() => setEquityPopoverKey(equityPopoverKey === r.key ? null : r.key)}
@@ -1259,7 +1326,7 @@ export default function EquitySplitStudio() {
                         </button>
 
                         {equityPopoverKey === r.key && (() => {
-                          const result = computeSuggestedEquity(csuite[r.key].factors, csuite[r.key].fteShare);
+                          const result = computeSuggestedEquity(r.factors, csuite[r.key].fteShare);
                           return (
                             <div className="absolute z-30 mt-2 w-[280px] bg-[#111111] border border-[#2A2A2A] rounded-xl p-4 shadow-2xl">
                               <div className="flex items-center justify-between mb-2">
@@ -1321,15 +1388,21 @@ export default function EquitySplitStudio() {
 
                       {csuiteTab === "individual" && (
                         <div className="space-y-2.5 pt-1">
+                          {r.isLinked && (
+                            <p className="text-[10.5px] text-[#6B6B66]">
+                              Curseurs synchronisés depuis Fondateurs &mdash; en lecture seule ici.
+                            </p>
+                          )}
                           {FACTORS.map((fac) => (
                             <div key={fac.key}>
                               <div className="flex justify-between text-[12px] mb-1">
                                 <span className="text-[#B5B5AF]">{fac.label}</span>
-                                <span className="text-[#6B6B66] font-mono">{csuite[r.key].factors[fac.key]}/10</span>
+                                <span className="text-[#6B6B66] font-mono">{r.factors[fac.key]}/10</span>
                               </div>
-                              <input type="range" min={0} max={10} value={csuite[r.key].factors[fac.key]}
-                                style={{ "--thumb": r.color, width: "100%" }}
-                                onChange={(e) => updateCsuiteFactor(r.key, fac.key, Number(e.target.value))} />
+                              <input type="range" min={0} max={10} value={r.factors[fac.key]}
+                                disabled={r.isLinked}
+                                style={{ "--thumb": r.color, width: "100%", opacity: r.isLinked ? 0.5 : 1 }}
+                                onChange={(e) => !r.isLinked && updateCsuiteFactor(r.key, fac.key, Number(e.target.value))} />
                             </div>
                           ))}
                         </div>
