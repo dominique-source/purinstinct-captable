@@ -1,8 +1,10 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
-import { Plus, Trash2, Info, TrendingUp, ShieldCheck, ChevronDown, RotateCcw, Users, History, ArrowRightLeft, Copy, X } from "lucide-react";
+import { Plus, Trash2, Info, TrendingUp, ShieldCheck, ChevronDown, RotateCcw, Users, History, ArrowRightLeft, Copy, X, Clock, AlertTriangle } from "lucide-react";
 import { db, authReady, firebaseEnabled } from "./firebase";
-import { collection, addDoc, serverTimestamp, query, orderBy, limit, onSnapshot } from "firebase/firestore";
+import { collection, addDoc, updateDoc, doc, increment, serverTimestamp, query, orderBy, limit, onSnapshot } from "firebase/firestore";
+
+const SESSION_GAP_MS = 30 * 60 * 1000; // au-delà de 30 min d'inactivité, on démarre une nouvelle session d'historique
 
 const FOUNDER_COLORS = ["#CCFF00", "#7C9EFF", "#FF6B6B", "#4FD1C5", "#F5A623", "#C792EA"];
 
@@ -211,12 +213,16 @@ export default function EquitySplitStudio() {
   const [csuiteSeedTopUpPool, setCsuiteSeedTopUpPool] = useState(true);
   const [csuiteSeedTopUpTarget, setCsuiteSeedTopUpTarget] = useState(15);
 
-  // Historique (Firebase) — snapshots automatiques de l'état complet
+  // Historique (Firebase) — sessions de travail sauvegardées automatiquement
   const [history, setHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [confirmRestoreId, setConfirmRestoreId] = useState(null);
+  const [currentSessionId, setCurrentSessionId] = useState(() => (typeof window !== "undefined" ? localStorage.getItem("captable_session_id") : null));
   const restoringRef = useRef(false);
   const lastSavedRef = useRef(null);
   const saveTimerRef = useRef(null);
+  const sessionIdRef = useRef(currentSessionId);
+  const sessionLastEditRef = useRef(Number(typeof window !== "undefined" && localStorage.getItem("captable_session_last_edit")) || 0);
 
   const resetAll = () => {
     const fresh = getInitialFounders();
@@ -423,20 +429,28 @@ export default function EquitySplitStudio() {
     setCsuiteSeedTopUpPool(snap.csuiteSeedTopUpPool ?? true);
     setCsuiteSeedTopUpTarget(snap.csuiteSeedTopUpTarget ?? 15);
     setShowHistory(false);
+    setConfirmRestoreId(null);
+    // Restaurer une ancienne version démarre une nouvelle session — on ne veut pas
+    // écraser silencieusement la session historique qu'on vient de restaurer.
+    sessionIdRef.current = null;
+    sessionLastEditRef.current = 0;
+    setCurrentSessionId(null);
+    localStorage.removeItem("captable_session_id");
+    localStorage.removeItem("captable_session_last_edit");
     setTimeout(() => { restoringRef.current = false; }, 0);
   };
 
-  // Écoute les 30 derniers snapshots d'historique
+  // Écoute les 30 dernières sessions d'historique
   useEffect(() => {
     if (!firebaseEnabled) return;
-    const q = query(collection(db, "captable_history"), orderBy("createdAt", "desc"), limit(30));
+    const q = query(collection(db, "captable_history"), orderBy("updatedAt", "desc"), limit(30));
     const unsub = onSnapshot(q, (snap) => {
       setHistory(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
     return unsub;
   }, []);
 
-  // Sauvegarde automatique (débounce 2.5s) à chaque changement significatif
+  // Sauvegarde automatique groupée par session de travail (30 min d'inactivité = nouvelle session)
   useEffect(() => {
     if (!firebaseEnabled) return;
     if (restoringRef.current) return;
@@ -448,7 +462,22 @@ export default function EquitySplitStudio() {
     saveTimerRef.current = setTimeout(async () => {
       try {
         await authReady;
-        await addDoc(collection(db, "captable_history"), { data: snap, createdAt: serverTimestamp() });
+        const now = Date.now();
+        const isNewSession = !sessionIdRef.current || (now - sessionLastEditRef.current) > SESSION_GAP_MS;
+        if (isNewSession) {
+          const ref = await addDoc(collection(db, "captable_history"), {
+            data: snap, createdAt: serverTimestamp(), updatedAt: serverTimestamp(), editCount: 1,
+          });
+          sessionIdRef.current = ref.id;
+          setCurrentSessionId(ref.id);
+        } else {
+          await updateDoc(doc(db, "captable_history", sessionIdRef.current), {
+            data: snap, updatedAt: serverTimestamp(), editCount: increment(1),
+          });
+        }
+        sessionLastEditRef.current = now;
+        localStorage.setItem("captable_session_id", sessionIdRef.current);
+        localStorage.setItem("captable_session_last_edit", String(now));
         lastSavedRef.current = serialized;
       } catch (err) {
         console.error("Sauvegarde historique échouée", err);
@@ -458,9 +487,34 @@ export default function EquitySplitStudio() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [method, founders, weights, esopPool, cliffMonths, vestMonths, raiseAmount, preMoney, topUpPool, topUpTarget, csuite, csuiteWeights, csuiteEsop, csuiteSeedRaise, csuiteSeedCap, csuiteSeedTopUpPool, csuiteSeedTopUpTarget]);
 
-  const formatHistoryDate = (ts) => {
+  // Fermer le tiroir d'historique avec Échap
+  useEffect(() => {
+    if (!showHistory) return;
+    const onKey = (e) => { if (e.key === "Escape") { setShowHistory(false); setConfirmRestoreId(null); } };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showHistory]);
+
+  const formatTime = (ts) => (ts?.toDate ? ts.toDate().toLocaleTimeString("fr-CA", { hour: "2-digit", minute: "2-digit" }) : "…");
+  const formatDate = (ts) => (ts?.toDate ? ts.toDate().toLocaleDateString("fr-CA", { day: "numeric", month: "short" }) : "");
+
+  const formatSessionRange = (h) => {
+    if (!h.createdAt?.toDate || !h.updatedAt?.toDate) return "…";
+    const start = h.createdAt.toDate();
+    const end = h.updatedAt.toDate();
+    const dateStr = formatDate(h.createdAt);
+    if (Math.abs(end - start) < 60000) return `${dateStr} · ${formatTime(h.createdAt)}`;
+    return `${dateStr} · ${formatTime(h.createdAt)} – ${formatTime(h.updatedAt)}`;
+  };
+
+  const formatRelative = (ts) => {
     if (!ts?.toDate) return "…";
-    return ts.toDate().toLocaleString("fr-CA", { dateStyle: "medium", timeStyle: "short" });
+    const diffMin = Math.round((Date.now() - ts.toDate().getTime()) / 60000);
+    if (diffMin < 1) return "à l'instant";
+    if (diffMin < 60) return `il y a ${diffMin} min`;
+    const diffH = Math.round(diffMin / 60);
+    if (diffH < 24) return `il y a ${diffH} h`;
+    return `il y a ${Math.round(diffH / 24)} j`;
   };
 
   return (
@@ -472,7 +526,123 @@ export default function EquitySplitStudio() {
         input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%; background: var(--thumb, #CCFF00); cursor: pointer; border: 2px solid #0D0D0D; box-shadow: 0 0 0 1px rgba(255,255,255,0.15); }
         .scrollbar-thin::-webkit-scrollbar { height: 4px; width: 4px; }
         .scrollbar-thin::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
+        @keyframes historyDrawerIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+        @keyframes historyScrimIn { from { opacity: 0; } to { opacity: 1; } }
+        @media (prefers-reduced-motion: reduce) {
+          .history-drawer, .history-scrim { animation: none !important; }
+        }
       `}</style>
+
+      {/* Tiroir d'historique */}
+      {showHistory && (
+        <>
+          <div
+            className="history-scrim fixed inset-0 bg-black/60 backdrop-blur-sm z-40"
+            style={{ animation: "historyScrimIn 200ms ease-out" }}
+            onClick={() => { setShowHistory(false); setConfirmRestoreId(null); }}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Historique des sessions"
+            className="history-drawer fixed top-0 right-0 h-full w-full sm:w-[420px] bg-[#111111] border-l border-[#232323] z-50 shadow-2xl flex flex-col"
+            style={{ animation: "historyDrawerIn 260ms cubic-bezier(0.16, 1, 0.3, 1)" }}
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[#232323] flex-shrink-0">
+              <div>
+                <div className="text-[11px] tracking-[0.2em] text-[#CCFF00] font-semibold flex items-center gap-1.5">
+                  <History size={12} /> HISTORIQUE
+                </div>
+                <div className="text-[13px] text-[#9A9A94] mt-1">
+                  {history.length} session{history.length !== 1 ? "s" : ""} sauvegardée{history.length !== 1 ? "s" : ""}
+                </div>
+              </div>
+              <button
+                onClick={() => { setShowHistory(false); setConfirmRestoreId(null); }}
+                aria-label="Fermer l'historique"
+                className="text-[#8A8A85] hover:text-[#F2F2ED] p-2 -mr-2 rounded-full hover:bg-[#1D1D1D] transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto scrollbar-thin px-4 py-4 space-y-2.5">
+              {history.length === 0 && (
+                <div className="text-center py-16 px-4">
+                  <Clock size={26} className="text-[#333] mx-auto mb-3" />
+                  <p className="text-[13px] text-[#8A8A85]">Aucune session enregistrée pour l'instant.</p>
+                  <p className="text-[11.5px] text-[#6B6B66] mt-1.5 leading-relaxed max-w-[260px] mx-auto">
+                    Chaque session de travail se sauvegarde automatiquement. Reviens ici après avoir fait des changements pour la retrouver.
+                  </p>
+                </div>
+              )}
+
+              {history.map((h) => {
+                const isCurrent = h.id === currentSessionId;
+                const pendingConfirm = confirmRestoreId === h.id;
+                return (
+                  <div
+                    key={h.id}
+                    className={`rounded-2xl border p-4 transition-colors ${
+                      isCurrent ? "border-[#CCFF00]/40 bg-[#CCFF00]/[0.05]" : "border-[#232323] bg-[#161616]"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[13px] font-semibold text-[#F2F2ED]">{formatSessionRange(h)}</span>
+                          {isCurrent && (
+                            <span className="text-[9px] tracking-wide uppercase text-[#0D0D0D] bg-[#CCFF00] rounded-full px-1.5 py-0.5 font-semibold flex-shrink-0">
+                              En cours
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11.5px] text-[#8A8A85] mt-1">
+                          {formatRelative(h.updatedAt)} &middot; {h.editCount || 1} modification{(h.editCount || 1) > 1 ? "s" : ""}
+                        </div>
+                      </div>
+                    </div>
+
+                    {pendingConfirm ? (
+                      <div className="mt-3 pt-3 border-t border-[#232323]">
+                        <div className="flex items-start gap-2 mb-3">
+                          <AlertTriangle size={13} className="text-[#F5A623] flex-shrink-0 mt-0.5" />
+                          <span className="text-[11.5px] text-[#B5B5AF]">
+                            Ceci va remplacer l'état actuel par cette session. Tes changements non sauvegardés depuis seront perdus.
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => setConfirmRestoreId(null)}
+                            className="text-[12px] text-[#9A9A94] hover:text-[#F2F2ED] px-3 py-1.5 rounded-full border border-[#2A2A2A] hover:border-[#444] transition-colors"
+                          >
+                            Annuler
+                          </button>
+                          <button
+                            onClick={() => restoreSnapshot(h.data)}
+                            className="text-[12px] font-semibold text-[#0D0D0D] bg-[#CCFF00] hover:brightness-110 rounded-full px-3.5 py-1.5 transition-[filter]"
+                          >
+                            Confirmer la restauration
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      !isCurrent && (
+                        <button
+                          onClick={() => setConfirmRestoreId(h.id)}
+                          className="mt-3 flex items-center gap-1.5 text-[11.5px] text-[#CCFF00] hover:underline"
+                        >
+                          <RotateCcw size={11} /> Restaurer cette session
+                        </button>
+                      )
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Header */}
       <div className="border-b border-[#232323] px-5 sm:px-8 pt-8 pb-6">
@@ -497,29 +667,6 @@ export default function EquitySplitStudio() {
             </div>
           </div>
 
-          {showHistory && (
-            <div className="mb-4 bg-[#151515] border border-[#232323] rounded-2xl p-4 max-h-72 overflow-y-auto scrollbar-thin">
-              <div className="text-[11px] tracking-[0.2em] text-[#9A9A94] font-semibold mb-2">
-                HISTORIQUE — {history.length} version{history.length > 1 ? "s" : ""} sauvegardée{history.length > 1 ? "s" : ""} automatiquement
-              </div>
-              {history.length === 0 && (
-                <p className="text-[12px] text-[#6B6B66]">Aucune version enregistrée pour l'instant — les changements se sauvegardent automatiquement quelques secondes après chaque modification.</p>
-              )}
-              <div className="space-y-1.5">
-                {history.map((h) => (
-                  <div key={h.id} className="flex items-center justify-between gap-3 text-[12.5px] py-1.5 border-b border-[#232323] last:border-0">
-                    <span className="text-[#B5B5AF]">{formatHistoryDate(h.createdAt)}</span>
-                    <button
-                      onClick={() => restoreSnapshot(h.data)}
-                      className="text-[11px] text-[#CCFF00] hover:underline flex-shrink-0"
-                    >
-                      Restaurer
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           <h1 className="disp italic font-black text-[40px] sm:text-[56px] leading-[0.92] tracking-tight">
             Equity Split<br />Studio
