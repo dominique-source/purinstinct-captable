@@ -217,6 +217,7 @@ export default function EquitySplitStudio() {
   const [history, setHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
   const [confirmRestoreId, setConfirmRestoreId] = useState(null);
+  const [isFlushingSave, setIsFlushingSave] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState(() => (typeof window !== "undefined" ? localStorage.getItem("captable_session_id") : null));
   const restoringRef = useRef(false);
   const lastSavedRef = useRef(null);
@@ -409,7 +410,38 @@ export default function EquitySplitStudio() {
     csuiteSeedRaise, csuiteSeedCap, csuiteSeedTopUpPool, csuiteSeedTopUpTarget,
   });
 
-  const restoreSnapshot = (snap) => {
+  const restoreSnapshot = async (snap) => {
+    // Flush toute modification en attente de la session en cours AVANT de basculer,
+    // pour garantir qu'aucun changement récent (< 2.5s) ne soit perdu.
+    if (firebaseEnabled && saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+      const pending = snapshotState();
+      const serializedPending = JSON.stringify(pending);
+      if (serializedPending !== lastSavedRef.current) {
+        setIsFlushingSave(true);
+        try {
+          await authReady;
+          const now = Date.now();
+          if (sessionIdRef.current && now - sessionLastEditRef.current <= SESSION_GAP_MS) {
+            await updateDoc(doc(db, "captable_history", sessionIdRef.current), {
+              data: pending, updatedAt: serverTimestamp(), editCount: increment(1),
+            });
+          } else {
+            const ref = await addDoc(collection(db, "captable_history"), {
+              data: pending, createdAt: serverTimestamp(), updatedAt: serverTimestamp(), editCount: 1,
+            });
+            sessionIdRef.current = ref.id;
+          }
+          lastSavedRef.current = serializedPending;
+        } catch (err) {
+          console.error("Flush avant restauration échoué", err);
+        } finally {
+          setIsFlushingSave(false);
+        }
+      }
+    }
+
     restoringRef.current = true;
     setMethod(snap.method);
     setFounders(snap.founders);
@@ -608,21 +640,26 @@ export default function EquitySplitStudio() {
                         <div className="flex items-start gap-2 mb-3">
                           <AlertTriangle size={13} className="text-[#F5A623] flex-shrink-0 mt-0.5" />
                           <span className="text-[11.5px] text-[#B5B5AF]">
-                            Ceci va remplacer l'état actuel par cette session. Tes changements non sauvegardés depuis seront perdus.
+                            La session en cours sera d'abord sauvegardée (zéro perte), puis remplacée à l'écran par cette session.
                           </span>
                         </div>
                         <div className="flex items-center justify-end gap-2">
                           <button
                             onClick={() => setConfirmRestoreId(null)}
-                            className="text-[12px] text-[#9A9A94] hover:text-[#F2F2ED] px-3 py-1.5 rounded-full border border-[#2A2A2A] hover:border-[#444] transition-colors"
+                            disabled={isFlushingSave}
+                            className="text-[12px] text-[#9A9A94] hover:text-[#F2F2ED] px-3 py-1.5 rounded-full border border-[#2A2A2A] hover:border-[#444] transition-colors disabled:opacity-40"
                           >
                             Annuler
                           </button>
                           <button
                             onClick={() => restoreSnapshot(h.data)}
-                            className="text-[12px] font-semibold text-[#0D0D0D] bg-[#CCFF00] hover:brightness-110 rounded-full px-3.5 py-1.5 transition-[filter]"
+                            disabled={isFlushingSave}
+                            className="text-[12px] font-semibold text-[#0D0D0D] bg-[#CCFF00] hover:brightness-110 rounded-full px-3.5 py-1.5 transition-[filter] disabled:opacity-60 flex items-center gap-1.5"
                           >
-                            Confirmer la restauration
+                            {isFlushingSave && (
+                              <span className="w-3 h-3 border-2 border-[#0D0D0D]/30 border-t-[#0D0D0D] rounded-full animate-spin" />
+                            )}
+                            {isFlushingSave ? "Sauvegarde en cours…" : "Confirmer la restauration"}
                           </button>
                         </div>
                       </div>
