@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { Plus, Trash2, Info, TrendingUp, ShieldCheck, ChevronDown, RotateCcw, Users, History, ArrowRightLeft, Copy, X, Clock, AlertTriangle, Sparkles, Bookmark, BookmarkPlus } from "lucide-react";
 import { db, authReady, firebaseEnabled } from "./firebase";
+import Valuation from "./Valuation";
 import { collection, addDoc, updateDoc, doc, increment, serverTimestamp, query, orderBy, limit, onSnapshot } from "firebase/firestore";
 
 const SESSION_GAP_MS = 30 * 60 * 1000; // au-delà de 30 min d'inactivité, on démarre une nouvelle session d'historique
@@ -2120,6 +2121,14 @@ export default function EquitySplitStudio() {
           )}
         </div>
       </div>
+
+      {/* ── Section Valorisation pre-revenue ── */}
+      <Valuation
+        onApply={(v) => {
+          setPreMoney(v);
+          setCsuiteSeedCap(v);
+        }}
+      />
     </div>
   );
 }
